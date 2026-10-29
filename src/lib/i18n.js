@@ -26,7 +26,8 @@ const messages = {
     settingsDelay: "Delay",
     settingsOpenAnnotator: "Open annotator after capture",
     settingsCopyAfterSave: "Copy to clipboard after save",
-    settingsCopyAfterSaveWhy: "Paste into docs, chat, or other apps right away.",
+    settingsCopyAfterSaveWhy:
+      "On by default. After save, the image replaces whatever is currently on the system clipboard.",
     settingsDefaultDisplay: "Default display",
     settingsMedia: "File",
     settingsFileFormat: "Format",
@@ -182,7 +183,7 @@ const messages = {
     settingsDelay: "延时",
     settingsOpenAnnotator: "截图后打开标注",
     settingsCopyAfterSave: "保存后复制到剪贴板",
-    settingsCopyAfterSaveWhy: "方便在其它地方直接粘贴使用。",
+    settingsCopyAfterSaveWhy: "默认开启。保存后会用截图覆盖系统剪贴板中的当前内容。",
     settingsDefaultDisplay: "默认显示器",
     settingsMedia: "文件",
     settingsFileFormat: "格式",

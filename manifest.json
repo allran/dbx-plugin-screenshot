@@ -3,9 +3,9 @@
   "manifest_version": 1,
   "id": "io.dbx.screenshot",
   "name": "Screenshot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "alan",
-  "description": "Capture the screen and keep a local screenshot history in DBX.",
+  "description": "Capture the screen and keep a local screenshot history in DBX. Saving can copy the image to the clipboard (overwrites current clipboard contents; toggle in settings).",
   "icon": "assets/plugin.svg",
   "source": "https://github.com/allran/dbx-plugin-screenshot",
   "homepage": "https://github.com/allran/dbx-plugin-screenshot",
@@ -13,7 +13,7 @@
     "dbx": ">=0.5.68",
     "host_api": "1"
   },
-  "permissions": ["host.events"],
+  "permissions": ["host.events", "host.binary"],
   "entrypoints": {
     "backend": {
       "protocol_versions": [1],
@@ -67,7 +67,7 @@
   "localizations": {
     "zh-CN": {
       "name": "截图",
-      "description": "截取屏幕并在 DBX 中保存本机截图历史。",
+      "description": "截取屏幕并在 DBX 中保存本机截图历史。保存后可复制到剪贴板（会覆盖当前剪贴板内容，可在设置中关闭）。",
       "contributions": {
         "io.dbx.screenshot.workbench": {
           "label": "截图",

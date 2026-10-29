@@ -1,17 +1,17 @@
 {
   "name": "Screenshot",
-  "description": "Capture the screen and keep a local screenshot history in DBX.",
+  "description": "Capture the screen and keep a local screenshot history in DBX. Saving can copy the image to the clipboard (overwrites current clipboard contents; toggle in settings).",
   "icon": "assets/plugin.svg",
   "tags": ["screenshot", "productivity", "workbench"],
-  "permissions": ["host.events"],
+  "permissions": ["host.events", "host.binary"],
   "source": "https://github.com/allran/dbx-plugin-screenshot",
   "homepage": "https://github.com/allran/dbx-plugin-screenshot",
   "license": "Apache-2.0",
-  "releaseNotes": "Initial release: display/window/region/delay capture, annotation tools, preferences, history, and Screen Recording permission flow.",
+  "releaseNotes": "0.1.1: declare host.binary; Windows interactive region capture; package LICENSE; clean capture tmp on failure/clear; disclose default copy-to-clipboard overwrites the system clipboard.",
   "localizations": {
     "zh-CN": {
       "name": "截图",
-      "description": "截取屏幕并在 DBX 中保存本机截图历史。"
+      "description": "截取屏幕并在 DBX 中保存本机截图历史。保存后可复制到剪贴板（会覆盖当前剪贴板内容，可在设置中关闭）。"
     }
   }
 }

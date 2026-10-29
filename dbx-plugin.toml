@@ -6,7 +6,7 @@ directory = "backend"
 binary = "dbx-plugin-screenshot"
 
 [package]
-include = ["assets", "ui"]
+include = ["assets", "ui", "LICENSE"]
 
 [dev]
 ui_build = ["npm", "run", "build"]

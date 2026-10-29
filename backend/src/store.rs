@@ -95,6 +95,7 @@ impl HistoryStore {
         }
         self.items.clear();
         let _ = fs::remove_dir_all(data_dir().join("blobs"));
+        let _ = fs::remove_dir_all(data_dir().join("tmp"));
         self.persist()
     }
 

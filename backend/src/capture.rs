@@ -1,5 +1,3 @@
-use std::fs;
-use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
@@ -7,13 +5,20 @@ use dbx_plugin_sdk::PluginError;
 use image::RgbaImage;
 use xcap::{Monitor, Window};
 
-use crate::media::{preview_jpeg_data_url, temp_capture_path};
+use crate::media::preview_jpeg_data_url;
 use crate::model::{
     CaptureImage, DisplayInfo, WindowInfo, MAX_WINDOW_PREVIEWS, WINDOW_PREVIEW_EDGE,
 };
 use crate::permission;
 use crate::util::log_stderr;
 use crate::window_filter::should_skip_window;
+
+#[cfg(not(windows))]
+use std::fs;
+#[cfg(not(windows))]
+use std::process::{Command, Stdio};
+#[cfg(not(windows))]
+use crate::media::temp_capture_path;
 
 pub const ERR_CANCELLED: i32 = -32010;
 pub const ERR_PERMISSION: i32 = -32011;
@@ -288,12 +293,14 @@ fn rgba_capture(image: RgbaImage, display_index: u32, display_name: String) -> R
     })
 }
 
+#[cfg(not(windows))]
 fn capture_from_file(
     path: std::path::PathBuf,
     display_index: u32,
     display_name: String,
 ) -> Result<CaptureImage, PluginError> {
     let (width, height) = image::image_dimensions(&path).map_err(|err| {
+        let _ = fs::remove_file(&path);
         PluginError::new(-32000, format!("Failed to read capture dimensions: {err}"))
     })?;
     if width == 0 || height == 0 {
@@ -365,12 +372,23 @@ fn capture_region_macos() -> Result<CaptureImage, PluginError> {
 
 #[cfg(target_os = "windows")]
 fn capture_region_windows() -> Result<CaptureImage, PluginError> {
-    // Snipping Tool interactive UI (Win10+). Saves via temp path is unreliable across locales,
-    // so currently return a clear unsupported message until a native picker lands.
-    Err(PluginError::new(
-        -32000,
-        "Region capture on Windows is not implemented yet; use full-display capture for now",
-    ))
+    use interactive_screenshot::{start_capture, CaptureOutcome};
+
+    match start_capture() {
+        Ok(CaptureOutcome::Captured { rgba, width, height }) => {
+            let image = RgbaImage::from_raw(width, height, rgba).ok_or_else(|| {
+                PluginError::new(-32000, "Invalid region capture buffer")
+            })?;
+            rgba_capture(image, 0, "Region".into())
+        }
+        Ok(CaptureOutcome::Cancelled) => {
+            Err(PluginError::new(ERR_CANCELLED, "Region capture cancelled"))
+        }
+        Err(err) => Err(PluginError::new(
+            -32000,
+            format!("Region capture failed: {err}"),
+        )),
+    }
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
