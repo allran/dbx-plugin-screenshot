@@ -20,6 +20,7 @@ jobs:
             pkg-config \
             libwayland-dev \
             libxkbcommon-dev \
+            libpipewire-0.3-dev \
             libxcb1-dev \
             libxcb-render0-dev \
             libxcb-shape0-dev \
