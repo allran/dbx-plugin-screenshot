@@ -12,7 +12,20 @@ jobs:
     uses: t8y2/dbx/.github/workflows/plugin-release-reusable.yml@plugin-cli-v0.1.9
     with:
       release-tag: ${{ github.event.release.tag_name }}
-      package-command: npm ci && npm run build && dbx-plugin package .
+      # xcap/arboard pull wayland-sys on Linux; install headers before cargo build.
+      package-command: |
+        if [[ "${DBX_PLUGIN_TARGET}" == linux-* ]]; then
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+        fi
+        npm ci && npm run build && dbx-plugin package .
       package-path: dist/*.dbxp
       metadata-path: dist/*.artifact.json
       plugin-cli-version: 0.1.9
