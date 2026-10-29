@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/t8y2/dbx/main/plugins/manifest.schema.json",
+  "manifest_version": 1,
+  "id": "io.dbx.screenshot",
+  "name": "Screenshot",
+  "version": "0.1.0",
+  "publisher": "alan",
+  "description": "Capture the screen and keep a local screenshot history in DBX.",
+  "icon": "assets/plugin.svg",
+  "source": "https://github.com/allran/dbx-plugin-screenshot",
+  "homepage": "https://github.com/allran/dbx-plugin-screenshot",
+  "engines": {
+    "dbx": ">=0.5.68",
+    "host_api": "1"
+  },
+  "permissions": ["host.events"],
+  "entrypoints": {
+    "backend": {
+      "protocol_versions": [1],
+      "transport": "stdio-jsonl",
+      "executable": "bin/dbx-plugin-screenshot"
+    },
+    "ui": {
+      "root": "ui",
+      "entry": "ui/index.html"
+    }
+  },
+  "contributions": [
+    {
+      "type": "workbench",
+      "id": "io.dbx.screenshot.workbench",
+      "label": "Screenshot",
+      "description": "Capture displays and browse local screenshot history.",
+      "icon": "assets/plugin.svg"
+    },
+    {
+      "type": "command",
+      "id": "io.dbx.screenshot.open",
+      "label": "Open Screenshot",
+      "action": {
+        "type": "open-workbench",
+        "workbench": "io.dbx.screenshot.workbench",
+        "presentation": "tab",
+        "reuse": "singleton"
+      }
+    },
+    {
+      "type": "menus",
+      "id": "io.dbx.screenshot.menus",
+      "items": [
+        {
+          "location": "commandPalette",
+          "command": "io.dbx.screenshot.open",
+          "group": "navigation",
+          "order": 42
+        },
+        {
+          "location": "appToolbar",
+          "command": "io.dbx.screenshot.open",
+          "group": "navigation",
+          "order": 42,
+          "default_visible": true
+        }
+      ]
+    }
+  ],
+  "localizations": {
+    "zh-CN": {
+      "name": "截图",
+      "description": "截取屏幕并在 DBX 中保存本机截图历史。",
+      "contributions": {
+        "io.dbx.screenshot.workbench": {
+          "label": "截图",
+          "description": "截取显示器画面并浏览本机截图历史。"
+        },
+        "io.dbx.screenshot.open": {
+          "label": "打开截图"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Screenshot">
+  <rect width="64" height="64" rx="14" fill="#2563eb"/>
+  <!-- selection / crop glyph -->
+  <path
+    d="M18 26V18h8M46 26V18h-8M18 38v8h8M46 38v8h-8"
+    fill="none"
+    stroke="#fff"
+    stroke-width="3.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <rect x="24" y="24" width="16" height="16" rx="2" fill="#fff" opacity=".92"/>
+</svg>

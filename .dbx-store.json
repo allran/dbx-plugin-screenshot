@@ -1,0 +1,17 @@
+{
+  "name": "Screenshot",
+  "description": "Capture the screen and keep a local screenshot history in DBX.",
+  "icon": "assets/plugin.svg",
+  "tags": ["screenshot", "productivity", "workbench"],
+  "permissions": ["host.events"],
+  "source": "https://github.com/allran/dbx-plugin-screenshot",
+  "homepage": "https://github.com/allran/dbx-plugin-screenshot",
+  "license": "Apache-2.0",
+  "releaseNotes": "Initial release: display/window/region/delay capture, annotation tools, preferences, history, and Screen Recording permission flow.",
+  "localizations": {
+    "zh-CN": {
+      "name": "截图",
+      "description": "截取屏幕并在 DBX 中保存本机截图历史。"
+    }
+  }
+}
