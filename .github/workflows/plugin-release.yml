@@ -21,6 +21,8 @@ jobs:
             libwayland-dev \
             libxkbcommon-dev \
             libpipewire-0.3-dev \
+            libegl-dev \
+            libdbus-1-dev \
             libxcb1-dev \
             libxcb-render0-dev \
             libxcb-shape0-dev \
