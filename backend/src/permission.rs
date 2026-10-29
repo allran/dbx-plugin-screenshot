@@ -1,8 +1,10 @@
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 use dbx_plugin_sdk::PluginError;
 use serde::Serialize;
 
+#[cfg(target_os = "macos")]
 use crate::util::log_stderr;
 
 #[derive(Clone, Debug, Serialize)]
