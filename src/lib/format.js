@@ -63,6 +63,16 @@ export function formatItemLabel(item, text) {
 /** Map sidecar / host errors to a short user-facing string. */
 export function friendlyError(error, text) {
   const raw = error?.message || String(error || "");
+  const code = Number(error?.code);
+  if (
+    code === -32012 ||
+    /region_tool_missing|needs gnome-screenshot, spectacle, or scrot/i.test(raw)
+  ) {
+    return (
+      text?.regionToolMissing ||
+      "Region capture needs gnome-screenshot, spectacle, or scrot installed and on PATH."
+    );
+  }
   if (
     /Image file missing|Image blob missing|Failed to read image blob:.*No such file|os error 2|ENOENT|Path does not exist/i.test(
       raw,

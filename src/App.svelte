@@ -4,6 +4,7 @@
   import ClearModal from "./components/ClearModal.svelte";
   import ConfirmModal from "./components/ConfirmModal.svelte";
   import DelayCountdown from "./components/DelayCountdown.svelte";
+  import DisplayPicker from "./components/DisplayPicker.svelte";
   import HistoryItem from "./components/HistoryItem.svelte";
   import ImageLightbox from "./components/ImageLightbox.svelte";
   import SettingsDrawer from "./components/SettingsDrawer.svelte";
@@ -32,6 +33,8 @@
   let delayCountdownOpen = $state(false);
   let delayCountdownSecs = $state(DEFAULT_PREFS.delaySecs);
   let delayCountdownTimer = 0;
+  let displayPickerOpen = $state(false);
+  let displayPickerLoading = $state(false);
   let windowPickerOpen = $state(false);
   let windowPickerLoading = $state(false);
   let windowPreviewGeneration = 0;
@@ -170,13 +173,6 @@
     } finally {
       prefsSaving = false;
     }
-  }
-
-  async function onDisplaySelectChange(event) {
-    const value = event.currentTarget.value;
-    displayIndex = value === "" ? null : Number(value);
-    if (!Number.isFinite(displayIndex)) return;
-    await patchPrefs({ defaultDisplayIndex: displayIndex }, { silent: true });
   }
 
   async function openDataFolder() {
@@ -348,6 +344,42 @@
     await loadDisplays();
   }
 
+  async function openDisplayPicker() {
+    if (capturing || delayCountdownOpen) return;
+    if (!(await ensurePermissionForCapture())) return;
+
+    displayPickerLoading = true;
+    displayPickerOpen = true;
+    try {
+      await loadDisplays();
+      if (displays.length <= 1) {
+        displayPickerOpen = false;
+        await runCapture("display");
+        return;
+      }
+    } catch (error) {
+      displayPickerOpen = false;
+      toastError(error);
+    } finally {
+      displayPickerLoading = false;
+    }
+  }
+
+  function closeDisplayPicker() {
+    if (capturing) return;
+    displayPickerOpen = false;
+  }
+
+  async function selectDisplay(display) {
+    if (display?.index == null || capturing || displayPickerLoading) return;
+    displayIndex = Number(display.index);
+    displayPickerOpen = false;
+    if (Number.isFinite(displayIndex)) {
+      void patchPrefs({ defaultDisplayIndex: displayIndex }, { silent: true });
+    }
+    await runCapture("display");
+  }
+
   async function openWindowPicker() {
     if (!(await ensurePermissionForCapture())) return;
     windowPickerOpen = true;
@@ -440,9 +472,9 @@
         await loadList();
       }
     } catch (error) {
-      const message = error?.message || String(error);
+      const message = friendlyError(error, text);
       bootError = message;
-      if (/permission|Screen Recording|屏幕录制/i.test(message)) {
+      if (/permission|Screen Recording|屏幕录制/i.test(error?.message || String(error))) {
         await loadPermission();
       }
       showToast(`${text.error}: ${message}`);
@@ -792,7 +824,7 @@
           class="btn"
           type="button"
           disabled={capturing || delayCountdownOpen}
-          onclick={() => runCapture("display")}
+          onclick={openDisplayPicker}
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
             <path
@@ -861,24 +893,6 @@
           {text.captureDelay}
         </button>
       </div>
-
-      {#if displays.length > 1}
-        <select
-          class="select target"
-          value={displayIndex}
-          disabled={capturing || delayCountdownOpen}
-          title={text.captureScreen}
-          onchange={onDisplaySelectChange}
-        >
-          {#each displays as display (display.index)}
-            <option value={display.index}>
-              {display.name}
-              {display.isPrimary ? ` · ${text.capturePrimary}` : ""}
-              ({display.width}×{display.height})
-            </option>
-          {/each}
-        </select>
-      {/if}
 
       <button
         class="icon-btn settings-btn"
@@ -1005,6 +1019,20 @@
   message={text.delayCountdown}
   cancelLabel={text.cancel}
   oncancel={cancelDelayedCapture}
+/>
+
+<DisplayPicker
+  open={displayPickerOpen}
+  title={text.displayPickerTitle}
+  hint={text.displayPickerHint}
+  loadingLabel={text.displayPickerLoading}
+  emptyLabel={text.noDisplays}
+  primaryLabel={text.capturePrimary}
+  closeLabel={text.close}
+  loading={displayPickerLoading}
+  {displays}
+  onclose={closeDisplayPicker}
+  onselect={selectDisplay}
 />
 
 <WindowPicker
@@ -1152,7 +1180,6 @@
     border-top: 1px solid var(--border);
   }
 
-  .select,
   .search,
   .btn,
   .icon-btn {
@@ -1164,21 +1191,11 @@
     font: inherit;
   }
 
-  .select {
-    max-width: 260px;
-    padding: 0 10px;
-  }
-
   .actions {
     display: flex;
     gap: 8px;
     flex-shrink: 0;
     flex-wrap: wrap;
-  }
-
-  .select.target {
-    min-width: 160px;
-    max-width: 260px;
   }
 
   .btn {

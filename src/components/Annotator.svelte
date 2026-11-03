@@ -13,6 +13,7 @@
     cropHandleAt,
     resizeCrop,
     moveCrop,
+    fitCropAspect,
     MOSAIC_BLOCK,
     MOSAIC_BLUR,
   } from "../lib/annotateOps.js";
@@ -79,6 +80,10 @@
   let mosaicIntensity = $state(/** @type {"soft"|"standard"|"strong"} */ ("standard"));
   let mosaicStyle = $state(/** @type {"pixel"|"blur"} */ ("pixel"));
   let watermarkMode = $state(/** @type {"single"|"tiled"} */ ("single"));
+  /** @type {"free"|"16:9"|"4:3"|"1:1"|"custom"} */
+  let cropAspectPreset = $state("free");
+  let cropCustomW = $state(16);
+  let cropCustomH = $state(9);
 
   /** @type {null | { x: number, y: number, w: number, h: number }} */
   let cropSession = $state(null);
@@ -409,11 +414,13 @@
   }
 
   async function restoreSnapshot(snap) {
+    error = "";
     ops = cloneOps(snap.ops || []);
     if (snap.imageSrc && snap.imageSrc !== imageSrc) {
       imageSrc = snap.imageSrc;
       naturalWidth = snap.naturalWidth || 0;
       naturalHeight = snap.naturalHeight || 0;
+      // Keep original blob URL alive for further undos; onImageLoad will sync canvas.
       return;
     }
     naturalWidth = snap.naturalWidth || naturalWidth;
@@ -462,6 +469,22 @@
     redraw();
   }
 
+  function cropAspectRatio() {
+    if (cropAspectPreset === "16:9") return 16 / 9;
+    if (cropAspectPreset === "4:3") return 4 / 3;
+    if (cropAspectPreset === "1:1") return 1;
+    if (cropAspectPreset === "custom") {
+      const w = Math.max(1, Number(cropCustomW) || 1);
+      const h = Math.max(1, Number(cropCustomH) || 1);
+      return w / h;
+    }
+    return null;
+  }
+
+  function imageBounds() {
+    return { w: naturalWidth, h: naturalHeight };
+  }
+
   function startCropSession() {
     const nw = naturalWidth;
     const nh = naturalHeight;
@@ -471,12 +494,35 @@
     }
     const w = Math.round(nw * 0.8);
     const h = Math.round(nh * 0.8);
-    cropSession = {
+    let next = {
       x: Math.round((nw - w) / 2),
       y: Math.round((nh - h) / 2),
       w,
       h,
     };
+    const aspect = cropAspectRatio();
+    if (aspect) next = fitCropAspect(next, aspect, { w: nw, h: nh });
+    cropSession = next;
+    redraw();
+  }
+
+  function setCropAspectPreset(preset) {
+    cropAspectPreset = preset;
+    if (!cropSession || !naturalWidth || !naturalHeight) return;
+    const aspect = cropAspectRatio();
+    if (!aspect) {
+      redraw();
+      return;
+    }
+    cropSession = fitCropAspect(cropSession, aspect, imageBounds());
+    redraw();
+  }
+
+  function onCropCustomRatioInput() {
+    if (cropAspectPreset !== "custom" || !cropSession) return;
+    const aspect = cropAspectRatio();
+    if (!aspect) return;
+    cropSession = fitCropAspect(cropSession, aspect, imageBounds());
     redraw();
   }
 
@@ -991,13 +1037,19 @@
     const point = draftPoint(event);
 
     if (cropDrag && cropSession) {
-      const bounds = { w: naturalWidth, h: naturalHeight };
+      const bounds = imageBounds();
       if (cropDrag.kind === "move") {
         const dx = point.x - cropDrag.start.x;
         const dy = point.y - cropDrag.start.y;
         cropSession = moveCrop(cropDrag.origin, dx, dy, bounds);
       } else {
-        cropSession = resizeCrop(cropDrag.origin, cropDrag.handle, point, bounds);
+        cropSession = resizeCrop(
+          cropDrag.origin,
+          cropDrag.handle,
+          point,
+          bounds,
+          cropAspectRatio(),
+        );
       }
       redraw();
       return;
@@ -1157,7 +1209,8 @@
     cropDrag = null;
     naturalWidth = tmp.width;
     naturalHeight = tmp.height;
-    revokeLocalObjectUrl();
+    // Keep the pre-crop blob URL alive so undo can restore it (do not revoke here).
+    error = "";
     imageSrc = dataUrl;
     tool = "select";
   }
@@ -1893,14 +1946,78 @@
             {#if loading}
               <div class="loading">{text.annotateLoading || "Loading…"}</div>
             {/if}
-            {#if tool === "crop" && cropSession}
-              <div class="crop-hint">{text.cropHint || "Drag handles · Double-click to apply"}</div>
-            {/if}
           </div>
 
           <div class="chrome">
-            {#if showTextOptions() || tool === "mosaic" || tool === "watermark"}
+            {#if showTextOptions() || tool === "mosaic" || tool === "watermark" || tool === "crop"}
               <div class="options-strip">
+                {#if tool === "crop"}
+                  <span class="opt-label">{text.cropAspect || "Aspect"}</span>
+                  <div class="opt-seg" role="group" aria-label={text.cropAspect || "Aspect"}>
+                    <button
+                      type="button"
+                      class="opt-seg-btn"
+                      class:active={cropAspectPreset === "free"}
+                      onclick={() => setCropAspectPreset("free")}
+                    >
+                      {text.cropAspectFree || "Free"}
+                    </button>
+                    <button
+                      type="button"
+                      class="opt-seg-btn"
+                      class:active={cropAspectPreset === "16:9"}
+                      onclick={() => setCropAspectPreset("16:9")}
+                    >
+                      16:9
+                    </button>
+                    <button
+                      type="button"
+                      class="opt-seg-btn"
+                      class:active={cropAspectPreset === "4:3"}
+                      onclick={() => setCropAspectPreset("4:3")}
+                    >
+                      4:3
+                    </button>
+                    <button
+                      type="button"
+                      class="opt-seg-btn"
+                      class:active={cropAspectPreset === "1:1"}
+                      onclick={() => setCropAspectPreset("1:1")}
+                    >
+                      1:1
+                    </button>
+                    <button
+                      type="button"
+                      class="opt-seg-btn"
+                      class:active={cropAspectPreset === "custom"}
+                      onclick={() => setCropAspectPreset("custom")}
+                    >
+                      {text.cropAspectCustom || "Custom"}
+                    </button>
+                  </div>
+                  {#if cropAspectPreset === "custom"}
+                    <label class="crop-ratio" title={text.cropAspectCustom || "Custom"}>
+                      <input
+                        type="number"
+                        min="1"
+                        max="99"
+                        step="1"
+                        bind:value={cropCustomW}
+                        oninput={onCropCustomRatioInput}
+                      />
+                      <span class="crop-ratio-sep">:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="99"
+                        step="1"
+                        bind:value={cropCustomH}
+                        oninput={onCropCustomRatioInput}
+                      />
+                    </label>
+                  {/if}
+                  <span class="crop-hint">{text.cropHint || "Drag handles · Double-click to apply"}</span>
+                {/if}
                 {#if tool === "text"}
                   <span class="opt-label">{text.textType || "Type"}</span>
                   <div class="opt-seg" role="group" aria-label={text.textType || "Type"}>
@@ -2290,7 +2407,7 @@
   }
 
   .overlay.crop-cursor {
-    cursor: crosshair;
+    cursor: default;
   }
 
   .overlay.eyedropper-cursor {
@@ -2390,18 +2507,13 @@
   }
 
   .crop-hint {
-    position: absolute;
-    left: 50%;
-    bottom: 12px;
-    transform: translateX(-50%);
-    padding: 4px 10px;
-    border-radius: 6px;
-    background: rgba(15, 23, 42, 0.88);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(248, 250, 252, 0.9);
-    font-size: 12px;
+    margin-left: auto;
+    padding-left: 10px;
+    color: rgba(248, 250, 252, 0.55);
+    font-size: 11px;
+    line-height: 1.35;
+    white-space: nowrap;
     pointer-events: none;
-    z-index: 2;
   }
 
   .chrome {
@@ -2684,6 +2796,29 @@
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     color: rgba(248, 250, 252, 0.72);
+  }
+
+  .crop-ratio {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 2px;
+  }
+
+  .crop-ratio input {
+    width: 44px;
+    padding: 2px 4px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.55);
+    color: inherit;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .crop-ratio-sep {
+    color: rgba(248, 250, 252, 0.55);
+    font-size: 12px;
   }
 
   .state,

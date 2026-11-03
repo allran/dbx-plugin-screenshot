@@ -216,33 +216,158 @@ export function cropHandleAt(rect, point, tol) {
   return null;
 }
 
-export function resizeCrop(rect, handle, point, bounds) {
-  let { x, y, w, h } = rect;
-  const right = x + w;
-  const bottom = y + h;
-  let nx1 = x;
-  let ny1 = y;
-  let nx2 = right;
-  let ny2 = bottom;
-  if (handle.includes("n")) ny1 = point.y;
-  if (handle.includes("s")) ny2 = point.y;
-  if (handle.includes("w")) nx1 = point.x;
-  if (handle.includes("e")) nx2 = point.x;
-  let out = {
-    x: Math.min(nx1, nx2),
-    y: Math.min(ny1, ny2),
-    w: Math.max(8, Math.abs(nx2 - nx1)),
-    h: Math.max(8, Math.abs(ny2 - ny1)),
-  };
-  out.x = Math.max(0, Math.min(out.x, bounds.w - 8));
-  out.y = Math.max(0, Math.min(out.y, bounds.h - 8));
-  out.w = Math.min(out.w, bounds.w - out.x);
-  out.h = Math.min(out.h, bounds.h - out.y);
-  return out;
+/** Keep rect fully inside image; size first, then shift. */
+function clampCropRect(rect, bounds) {
+  const min = 8;
+  const maxW = Math.max(min, bounds.w);
+  const maxH = Math.max(min, bounds.h);
+  let w = Math.max(min, Math.min(rect.w, maxW));
+  let h = Math.max(min, Math.min(rect.h, maxH));
+  let x = Math.max(0, Math.min(rect.x, bounds.w - w));
+  let y = Math.max(0, Math.min(rect.y, bounds.h - h));
+  return { x, y, w, h };
+}
+
+/**
+ * Shrink w/h to fit aspect inside the available room from a fixed edge/corner,
+ * then place the rect without leaving image bounds.
+ */
+function placeAspectRect(anchor, handle, w, h, aspect, bounds, min) {
+  let aw = Math.max(min, w);
+  let ah = aw / aspect;
+  if (ah < min) {
+    ah = min;
+    aw = ah * aspect;
+  }
+
+  const maxW = handle.includes("w") ? anchor.x : bounds.w - anchor.x;
+  const maxH = handle.includes("n") ? anchor.y : bounds.h - anchor.y;
+  // Edge handles also grow the orthogonal axis around center — handled by callers.
+  aw = Math.min(aw, Math.max(min, maxW));
+  ah = aw / aspect;
+  if (ah > maxH) {
+    ah = Math.max(min, maxH);
+    aw = ah * aspect;
+  }
+  if (aw > maxW) {
+    aw = Math.max(min, maxW);
+    ah = aw / aspect;
+  }
+
+  let x = handle.includes("w") ? anchor.x - aw : anchor.x;
+  let y = handle.includes("n") ? anchor.y - ah : anchor.y;
+  return clampCropRect({ x, y, w: aw, h: ah }, bounds);
+}
+
+/** Keep center, fit aspect into current box then clamp to image bounds. */
+export function fitCropAspect(rect, aspect, bounds) {
+  if (!(aspect > 0) || !rect) return rect;
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  let w = rect.w;
+  let h = w / aspect;
+  if (h > rect.h) {
+    h = rect.h;
+    w = h * aspect;
+  }
+  w = Math.min(w, bounds.w);
+  h = w / aspect;
+  if (h > bounds.h) {
+    h = bounds.h;
+    w = h * aspect;
+  }
+  return clampCropRect({ x: cx - w / 2, y: cy - h / 2, w, h }, bounds);
+}
+
+export function resizeCrop(rect, handle, point, bounds, aspect = null) {
+  const min = 8;
+  const bw = Math.max(min, bounds.w);
+  const bh = Math.max(min, bounds.h);
+  // Keep the active pointer inside the image so the box never leaves.
+  const px = Math.max(0, Math.min(bw, point.x));
+  const py = Math.max(0, Math.min(bh, point.y));
+  const right = rect.x + rect.w;
+  const bottom = rect.y + rect.h;
+
+  if (!(aspect > 0)) {
+    let nx1 = rect.x;
+    let ny1 = rect.y;
+    let nx2 = right;
+    let ny2 = bottom;
+    // Clamp each moving edge against the fixed opposite edge + image bounds.
+    if (handle.includes("n")) ny1 = Math.max(0, Math.min(py, bottom - min));
+    if (handle.includes("s")) ny2 = Math.min(bh, Math.max(py, rect.y + min));
+    if (handle.includes("w")) nx1 = Math.max(0, Math.min(px, right - min));
+    if (handle.includes("e")) nx2 = Math.min(bw, Math.max(px, rect.x + min));
+    return {
+      x: Math.min(nx1, nx2),
+      y: Math.min(ny1, ny2),
+      w: Math.max(min, Math.abs(nx2 - nx1)),
+      h: Math.max(min, Math.abs(ny2 - ny1)),
+    };
+  }
+
+  if (handle === "e" || handle === "w") {
+    const fixedX = handle === "e" ? rect.x : right;
+    let w = handle === "e" ? px - fixedX : fixedX - px;
+    w = Math.max(min, w);
+    w = Math.min(w, handle === "e" ? bw - fixedX : fixedX);
+    let h = w / aspect;
+    const cy = rect.y + rect.h / 2;
+    // Limit height so the centered box stays inside top/bottom.
+    const maxH = 2 * Math.min(cy, bh - cy);
+    if (h > maxH) {
+      h = Math.max(min, maxH);
+      w = h * aspect;
+      w = Math.min(w, handle === "e" ? bw - fixedX : fixedX);
+      h = w / aspect;
+    }
+    const x = handle === "e" ? fixedX : fixedX - w;
+    const y = cy - h / 2;
+    return clampCropRect({ x, y, w, h }, bounds);
+  }
+
+  if (handle === "n" || handle === "s") {
+    const fixedY = handle === "s" ? rect.y : bottom;
+    let h = handle === "s" ? py - fixedY : fixedY - py;
+    h = Math.max(min, h);
+    h = Math.min(h, handle === "s" ? bh - fixedY : fixedY);
+    let w = h * aspect;
+    const cx = rect.x + rect.w / 2;
+    const maxW = 2 * Math.min(cx, bw - cx);
+    if (w > maxW) {
+      w = Math.max(min, maxW);
+      h = w / aspect;
+      h = Math.min(h, handle === "s" ? bh - fixedY : fixedY);
+      w = h * aspect;
+    }
+    const x = cx - w / 2;
+    const y = handle === "s" ? fixedY : fixedY - h;
+    return clampCropRect({ x, y, w, h }, bounds);
+  }
+
+  const anchor = {
+    nw: { x: right, y: bottom },
+    ne: { x: rect.x, y: bottom },
+    se: { x: rect.x, y: rect.y },
+    sw: { x: right, y: rect.y },
+  }[handle] || { x: rect.x, y: rect.y };
+
+  const dx = Math.abs(px - anchor.x);
+  const dy = Math.abs(py - anchor.y);
+  let w = Math.max(min, dx);
+  let h = w / aspect;
+  if (h < dy) {
+    h = Math.max(min, dy);
+    w = h * aspect;
+  }
+  return placeAspectRect(anchor, handle, w, h, aspect, bounds, min);
 }
 
 export function moveCrop(rect, dx, dy, bounds) {
-  const x = Math.max(0, Math.min(rect.x + dx, bounds.w - rect.w));
-  const y = Math.max(0, Math.min(rect.y + dy, bounds.h - rect.h));
-  return { ...rect, x, y };
+  const w = Math.min(rect.w, bounds.w);
+  const h = Math.min(rect.h, bounds.h);
+  const x = Math.max(0, Math.min(rect.x + dx, bounds.w - w));
+  const y = Math.max(0, Math.min(rect.y + dy, bounds.h - h));
+  return { x, y, w, h };
 }

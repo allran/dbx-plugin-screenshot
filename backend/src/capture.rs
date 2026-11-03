@@ -22,6 +22,8 @@ use crate::media::temp_capture_path;
 
 pub const ERR_CANCELLED: i32 = -32010;
 pub const ERR_PERMISSION: i32 = -32011;
+/// Linux region capture: none of gnome-screenshot / spectacle / scrot found on PATH.
+pub const ERR_REGION_TOOL_MISSING: i32 = -32012;
 
 pub fn list_displays() -> Result<Vec<DisplayInfo>, PluginError> {
     ensure_permission()?;
@@ -440,7 +442,7 @@ fn capture_region_linux() -> Result<CaptureImage, PluginError> {
         return Err(PluginError::new(ERR_CANCELLED, "Region capture cancelled"));
     }
     Err(PluginError::new(
-        -32000,
-        "Region capture needs gnome-screenshot, spectacle, or scrot on PATH",
+        ERR_REGION_TOOL_MISSING,
+        "region_tool_missing",
     ))
 }

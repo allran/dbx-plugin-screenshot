@@ -3,9 +3,9 @@
   "manifest_version": 1,
   "id": "io.dbx.screenshot",
   "name": "Screenshot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "alan",
-  "description": "Capture the screen and keep a local screenshot history in DBX. Saving can copy the image to the clipboard (overwrites current clipboard contents; toggle in settings).",
+  "description": "Capture the screen and keep a local screenshot history in DBX. Saving can copy the image to the clipboard (overwrites current clipboard contents; toggle in settings). On Linux, region capture needs gnome-screenshot, spectacle, or scrot on PATH.",
   "icon": "assets/plugin.svg",
   "source": "https://github.com/allran/dbx-plugin-screenshot",
   "homepage": "https://github.com/allran/dbx-plugin-screenshot",
@@ -67,7 +67,7 @@
   "localizations": {
     "zh-CN": {
       "name": "截图",
-      "description": "截取屏幕并在 DBX 中保存本机截图历史。保存后可复制到剪贴板（会覆盖当前剪贴板内容，可在设置中关闭）。",
+      "description": "截取屏幕并在 DBX 中保存本机截图历史。保存后可复制到剪贴板（会覆盖当前剪贴板内容，可在设置中关闭）。Linux 区域截图需系统已安装 gnome-screenshot、spectacle 或 scrot。",
       "contributions": {
         "io.dbx.screenshot.workbench": {
           "label": "截图",
