@@ -34,6 +34,12 @@ pub struct Preferences {
     /// Max screenshots kept in history.
     #[serde(default = "default_history_max")]
     pub history_max: u32,
+    /// Screen recording capture FPS: 5 | 8 | 10.
+    #[serde(default = "default_record_fps")]
+    pub record_fps: u32,
+    /// Screen recording max edge in pixels: 720 | 1080 | 1280.
+    #[serde(default = "default_record_max_edge")]
+    pub record_max_edge: u32,
 }
 
 fn default_delay_secs() -> u32 {
@@ -54,6 +60,12 @@ fn default_thumb_size() -> String {
 fn default_history_max() -> u32 {
     200
 }
+fn default_record_fps() -> u32 {
+    8
+}
+fn default_record_max_edge() -> u32 {
+    1280
+}
 
 impl Default for Preferences {
     fn default() -> Self {
@@ -66,6 +78,8 @@ impl Default for Preferences {
             quality: default_quality(),
             thumb_size: default_thumb_size(),
             history_max: default_history_max(),
+            record_fps: default_record_fps(),
+            record_max_edge: default_record_max_edge(),
         }
     }
 }
@@ -92,6 +106,14 @@ impl Preferences {
         self.history_max = match self.history_max {
             50 | 100 | 200 | 500 => self.history_max,
             _ => 200,
+        };
+        self.record_fps = match self.record_fps {
+            5 | 10 => self.record_fps,
+            _ => 8,
+        };
+        self.record_max_edge = match self.record_max_edge {
+            720 | 1080 => self.record_max_edge,
+            _ => 1280,
         };
         self
     }
@@ -185,14 +207,16 @@ pub fn save(prefs: Preferences) -> Result<Preferences, PluginError> {
         *guard = prefs.clone();
     }
     log_stderr(format!(
-        "prefs saved: format={} quality={} thumb={} delay={}s annotator={} copy={} display={:?}",
+        "prefs saved: format={} quality={} thumb={} delay={}s annotator={} copy={} display={:?} recordFps={} recordMaxEdge={}",
         prefs.file_format,
         prefs.quality,
         prefs.thumb_size,
         prefs.delay_secs,
         prefs.open_annotator_after_capture,
         prefs.copy_after_save,
-        prefs.default_display_index
+        prefs.default_display_index,
+        prefs.record_fps,
+        prefs.record_max_edge
     ));
     Ok(prefs)
 }
@@ -229,6 +253,12 @@ pub fn patch(params: &Value) -> Result<Preferences, PluginError> {
     if let Some(v) = params.get("historyMax").and_then(Value::as_u64) {
         prefs.history_max = v as u32;
     }
+    if let Some(v) = params.get("recordFps").and_then(Value::as_u64) {
+        prefs.record_fps = v as u32;
+    }
+    if let Some(v) = params.get("recordMaxEdge").and_then(Value::as_u64) {
+        prefs.record_max_edge = v as u32;
+    }
     save(prefs)
 }
 
@@ -244,6 +274,8 @@ pub fn get_with_meta(item_count: usize) -> Value {
         "quality": prefs.quality,
         "thumbSize": prefs.thumb_size,
         "historyMax": prefs.history_max,
+        "recordFps": prefs.record_fps,
+        "recordMaxEdge": prefs.record_max_edge,
         "historyCount": item_count,
     })
 }

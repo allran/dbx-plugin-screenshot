@@ -214,6 +214,44 @@
         </section>
 
         <section class="section">
+          <h3 class="section-title">{text.settingsRecord || "Screen recording"}</h3>
+
+          <div class="row">
+            <div class="row-label">{text.settingsRecordFps || "Frame rate"}</div>
+            <div class="seg">
+              {#each [5, 8, 10] as fps}
+                <button
+                  type="button"
+                  class="seg-btn"
+                  class:active={Number(prefs?.recordFps) === fps}
+                  disabled={saving}
+                  onclick={() => setField({ recordFps: fps })}
+                >
+                  {fps} fps
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="row-label">{text.settingsRecordClarity || "Clarity"}</div>
+            <div class="seg">
+              {#each [720, 1080, 1280] as edge}
+                <button
+                  type="button"
+                  class="seg-btn"
+                  class:active={Number(prefs?.recordMaxEdge) === edge}
+                  disabled={saving}
+                  onclick={() => setField({ recordMaxEdge: edge })}
+                >
+                  {edge}p
+                </button>
+              {/each}
+            </div>
+          </div>
+        </section>
+
+        <section class="section">
           <h3 class="section-title">{text.settingsStorage || "History & storage"}</h3>
           <div class="perm-list">
             <div class="perm-row">

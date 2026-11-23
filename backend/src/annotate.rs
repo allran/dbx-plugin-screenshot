@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::media::file_thumbnail_data_url;
 use crate::model::ScreenshotItem;
 use crate::prefs;
+use crate::record::is_video_item;
 use crate::store::HistoryStore;
 use crate::util::data_dir;
 
@@ -41,6 +42,9 @@ pub fn begin(store: &HistoryStore, item_id: &str) -> Result<Value, PluginError> 
     let item = store
         .get(item_id)
         .ok_or_else(|| PluginError::new(-32602, "Screenshot not found"))?;
+    if is_video_item(item) {
+        return Err(PluginError::new(-32000, "Video recordings cannot be annotated"));
+    }
     if item.media_file.is_none() {
         return Err(PluginError::new(-32000, "Image file missing"));
     }

@@ -10,6 +10,7 @@ use crate::annotate::replace_item_media;
 use crate::media::build_screenshot_item;
 use crate::model::{CaptureImage, ScreenshotItem};
 use crate::prefs;
+use crate::record::{build_recording_item, RecordedClip};
 use crate::util::{data_dir, item_matches, log_stderr, remove_media_file};
 
 pub struct HistoryStore {
@@ -56,6 +57,18 @@ impl HistoryStore {
         let id = Uuid::new_v4().to_string();
         let item = build_screenshot_item(&id, &capture).map_err(|err| {
             log_stderr(format!("build screenshot failed: {err:?}"));
+            err
+        })?;
+        self.items.insert(0, item.clone());
+        self.trim_to_limit(prefs::get().history_limit())?;
+        self.persist()?;
+        Ok(item)
+    }
+
+    pub fn push_recording(&mut self, clip: RecordedClip) -> Result<ScreenshotItem, PluginError> {
+        let id = Uuid::new_v4().to_string();
+        let item = build_recording_item(&id, &clip).map_err(|err| {
+            log_stderr(format!("build recording failed: {err:?}"));
             err
         })?;
         self.items.insert(0, item.clone());

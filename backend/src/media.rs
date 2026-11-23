@@ -1,5 +1,5 @@
-use std::fs;
-use std::io::Cursor;
+use std::fs::{self, File};
+use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -87,6 +87,7 @@ fn build_screenshot_item_from_file(
         capture_mode: non_empty_mode(&capture.capture_mode),
         media_file: Some(rel),
         preview_data_url: Some(preview_data_url),
+        duration_ms: None,
         favorite: false,
     })
 }
@@ -144,6 +145,7 @@ fn build_screenshot_item_from_rgba(
         capture_mode: non_empty_mode(&capture.capture_mode),
         media_file: Some(rel),
         preview_data_url: Some(preview_data_url),
+        duration_ms: None,
         favorite: false,
     })
 }
@@ -193,6 +195,19 @@ pub(crate) fn preview_jpeg_data_url(
         maybe_downscale_with_filter(width, height, rgba, max_edge, FilterType::Triangle)?;
     let rgb = rgba_to_rgb(view_w, view_h, &view_rgba)?;
     encode_jpeg_data_url(&rgb, 68)
+}
+
+/// JPEG data URL from an RGBA buffer (recording first-frame thumbs, etc.).
+pub(crate) fn rgba_jpeg_data_url(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    max_edge: u32,
+    quality: u8,
+) -> Result<String, PluginError> {
+    let (view_w, view_h, view_rgba) = maybe_downscale(width, height, rgba, max_edge)?;
+    let rgb = rgba_to_rgb(view_w, view_h, &view_rgba)?;
+    encode_jpeg_data_url(&rgb, quality)
 }
 
 fn rgba_to_rgb(
@@ -288,6 +303,7 @@ pub fn decode_image_file(path: &Path) -> Result<(u32, u32, Vec<u8>), PluginError
 fn media_content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|ext| ext.to_str()) {
         Some("png") => "image/png",
+        Some("mp4") => "video/mp4",
         _ => "image/jpeg",
     }
 }
@@ -324,8 +340,12 @@ pub fn read_media_blob(path: &Path, params: &serde_json::Value) -> Result<serde_
         }));
     }
 
-    let bytes = read_image_bytes(path)?;
-    let size = bytes.len() as u64;
+    // Range-aware: seek + read only the requested window (large MP4s must not load whole file).
+    let meta = fs::metadata(path).map_err(map_io_missing)?;
+    if !meta.is_file() {
+        return Err(PluginError::new(-32000, "Image file missing"));
+    }
+    let size = meta.len();
     let etag = format!("\"{size:x}-{size}\"");
 
     let (offset, end_inclusive) = match params.get("range").and_then(serde_json::Value::as_str) {
@@ -366,12 +386,18 @@ pub fn read_media_blob(path: &Path, params: &serde_json::Value) -> Result<serde_
     }
 
     let length = (end - offset + 1) as usize;
-    let slice = &bytes[offset as usize..=end as usize];
+    let mut file = File::open(path).map_err(map_io_missing)?;
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|err| PluginError::new(-32000, format!("Failed to seek media: {err}")))?;
+    let mut buf = vec![0u8; length];
+    file.read_exact(&mut buf)
+        .map_err(|err| PluginError::new(-32000, format!("Failed to read media range: {err}")))?;
+
     Ok(json!({
         "size": size,
         "offset": offset,
         "length": length,
-        "dataBase64": BASE64.encode(slice),
+        "dataBase64": BASE64.encode(&buf),
         "partial": offset > 0 || end + 1 < size,
         "contentType": content_type,
         "etag": etag,
@@ -427,6 +453,16 @@ pub fn build_lightbox_data_url(path: &Path) -> Result<(u32, u32, String), Plugin
 
 /// `full=true` keeps more resolution for annotation when the Host media URL is unavailable.
 pub fn build_media_data_url(path: &Path, full: bool) -> Result<(u32, u32, String), PluginError> {
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"))
+    {
+        return Err(PluginError::new(
+            -32000,
+            "Video preview requires the host media URL",
+        ));
+    }
     let bytes = read_image_bytes(path)?;
     let (width, height) = image::image_dimensions(path).map_err(|err| {
         PluginError::new(-32000, format!("Failed to read image dimensions: {err}"))

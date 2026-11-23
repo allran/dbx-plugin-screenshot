@@ -14,17 +14,22 @@ use crate::media::{build_lightbox_data_url, build_media_data_url, read_media_blo
 use crate::model::ScreenshotItem;
 use crate::permission;
 use crate::prefs;
+use crate::record::RecordingController;
 use crate::reveal::open_local_path;
 use crate::store::HistoryStore;
 use crate::util::data_dir;
 
 pub struct Plugin {
     store: Arc<Mutex<HistoryStore>>,
+    recording: RecordingController,
 }
 
 impl Plugin {
     pub fn new(store: Arc<Mutex<HistoryStore>>) -> Self {
-        Self { store }
+        Self {
+            store,
+            recording: RecordingController::new(),
+        }
     }
 
     fn with_store<R>(
@@ -36,6 +41,41 @@ impl Plugin {
             .lock()
             .map_err(|_| PluginError::new(-32000, "History store is poisoned"))?;
         f(&mut store)
+    }
+
+    fn record_status_response(&self) -> Result<Value, PluginError> {
+        let status = self.recording.poll_status();
+        if let Some(response) = self.take_pending_recording_response()? {
+            return Ok(response);
+        }
+        Ok(json!(status))
+    }
+
+    fn take_pending_recording_response(&self) -> Result<Option<Value>, PluginError> {
+        let Some(result) = self.recording.take_pending() else {
+            return Ok(None);
+        };
+        match result {
+            Ok(clip) => self.with_store(|store| {
+                let item = store.push_recording(clip)?;
+                Ok(Some(json!({
+                    "recording": false,
+                    "finalizing": false,
+                    "success": true,
+                    "item": item,
+                    "total": store.items.len(),
+                })))
+            }),
+            Err(err) => Ok(Some(json!({
+                "recording": false,
+                "finalizing": false,
+                "success": false,
+                "error": {
+                    "code": err.code,
+                    "message": err.message,
+                }
+            }))),
+        }
     }
 
     fn require_item(&self, id: &str) -> Result<ScreenshotItem, PluginError> {
@@ -117,6 +157,31 @@ impl PluginHandler for Plugin {
                     let items = store.list(query);
                     Ok(json!({ "items": items, "total": items.len() }))
                 })
+            }
+            "screenshot/record/status" => self.record_status_response(),
+            "screenshot/record/start" => {
+                let display_index = params
+                    .get("displayIndex")
+                    .and_then(Value::as_u64)
+                    .map(|v| v as u32);
+                let status = self.recording.start(display_index)?;
+                Ok(json!(status))
+            }
+            "screenshot/record/stop" => {
+                let _ = emitter.event(
+                    "screenshot/phase",
+                    json!({ "phase": "saving", "mode": "record" }),
+                );
+                // Capture ends here; MP4 mux runs in background. Poll status for item.
+                let status = self.recording.stop()?;
+                if let Some(response) = self.take_pending_recording_response()? {
+                    return Ok(response);
+                }
+                Ok(json!({
+                    "success": true,
+                    "finalizing": status.finalizing,
+                    "recording": status.recording,
+                }))
             }
             "screenshot/capture" => {
                 let mode = params

@@ -4,18 +4,19 @@ Capture displays and keep a local screenshot history inside a DBX workbench.
 
 Uses a Rust Sidecar (`xcap`) for system-level screen capture — not the Host clipboard API.
 
-## Features (0.1.0)
+## Features (0.1.3)
 
 - Proactive Screen Recording permission prompt (request / open Settings / recheck)
 - Capture primary or selected display
 - Interactive region capture (macOS system selection UI)
+- Silent screen recording to MP4 (no audio; start/stop in toolbar)
 - Optional 3s / 5s delay
 - History gallery with preview, copy, favorite, reveal-in-folder, clear
 - Command palette + app toolbar entry
 
 ## Permissions
 
-None declared. Sidecar reads the screen with the current OS user privileges.
+`host.events`, `host.binary`. Sidecar reads the screen with the current OS user privileges.
 
 **macOS:** grant **Screen Recording** to DBX in System Settings → Privacy & Security, then restart DBX.
 

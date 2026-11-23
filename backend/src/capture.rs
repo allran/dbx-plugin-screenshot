@@ -23,6 +23,7 @@ use crate::media::temp_capture_path;
 pub const ERR_CANCELLED: i32 = -32010;
 pub const ERR_PERMISSION: i32 = -32011;
 /// Linux region capture: none of gnome-screenshot / spectacle / scrot found on PATH.
+#[cfg(all(unix, not(target_os = "macos")))]
 pub const ERR_REGION_TOOL_MISSING: i32 = -32012;
 
 pub fn list_displays() -> Result<Vec<DisplayInfo>, PluginError> {

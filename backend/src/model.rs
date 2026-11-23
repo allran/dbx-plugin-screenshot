@@ -20,14 +20,17 @@ pub struct ScreenshotItem {
     pub display_index: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
-    /// Capture kind: `display` | `window` | `region` | `delay`.
+    /// Capture kind: `display` | `window` | `region` | `delay` | `record`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_mode: Option<String>,
-    /// Relative path under data dir, e.g. `blobs/<id>.png`.
+    /// Relative path under data dir, e.g. `blobs/<id>.png` or `blobs/<id>.mp4`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_data_url: Option<String>,
+    /// Screen recording duration in milliseconds (video items only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     #[serde(default)]
     pub favorite: bool,
 }

@@ -22,15 +22,33 @@ export function itemMatches(item, needle, text) {
 /** Infer capture mode for older history items without `captureMode`. */
 export function inferCaptureMode(item) {
   const mode = String(item?.captureMode || "").trim().toLowerCase();
-  if (mode === "display" || mode === "window" || mode === "region" || mode === "delay") {
+  if (
+    mode === "display" ||
+    mode === "window" ||
+    mode === "region" ||
+    mode === "delay" ||
+    mode === "record"
+  ) {
     return mode;
   }
+  if (/\.mp4$/i.test(String(item?.mediaFile || ""))) return "record";
   const name = String(item?.displayName || "").trim();
   const label = String(item?.label || "").trim();
   if (/^Region(\b|$)/i.test(name) || /^Region\s*·/i.test(label)) return "region";
   if (/^Display\s+\d+$/i.test(name)) return "display";
   if (/^Window\s+\d+$/i.test(name)) return "window";
   return "";
+}
+
+export function isVideoItem(item) {
+  return inferCaptureMode(item) === "record";
+}
+
+export function formatDuration(ms) {
+  const total = Math.max(0, Math.round(Number(ms) / 1000) || 0);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function mediaFileName(item) {
@@ -48,6 +66,7 @@ export function formatItemLabel(item, text) {
   else if (mode === "delay") title = text.captureDelay || "Delayed capture";
   else if (mode === "window") title = text.captureWindow || "Window capture";
   else if (mode === "display") title = text.captureScreen || "Screen capture";
+  else if (mode === "record") title = text.captureRecord || "Screen recording";
   else {
     const fallback = String(item?.displayName || item?.label || "")
       .replace(/\s*·\s*\d+\s*[×x]\s*\d+\s*$/i, "")
@@ -72,6 +91,9 @@ export function friendlyError(error, text) {
       text?.regionToolMissing ||
       "Region capture needs gnome-screenshot, spectacle, or scrot installed and on PATH."
     );
+  }
+  if (code === -32015 || /Not enough disk space/i.test(raw)) {
+    return text?.recordDiskLow || raw;
   }
   if (
     /Image file missing|Image blob missing|Failed to read image blob:.*No such file|os error 2|ENOENT|Path does not exist/i.test(

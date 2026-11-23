@@ -1,6 +1,6 @@
 [package]
 name = "dbx-plugin-screenshot"
-version = "0.1.1"
+version = "0.1.3"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -10,7 +10,10 @@ license = "Apache-2.0"
 arboard = "3"
 base64 = "0.22"
 dbx-plugin-sdk = { version = "0.1.0" }
+fs2 = "0.4"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+minimp4 = "0.1"
+openh264 = "0.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

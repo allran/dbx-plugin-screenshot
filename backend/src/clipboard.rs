@@ -3,9 +3,16 @@ use dbx_plugin_sdk::PluginError;
 
 use crate::media::decode_image_file;
 use crate::model::ScreenshotItem;
+use crate::record::is_video_item;
 use crate::util::data_dir;
 
 pub fn write_item_to_clipboard(item: &ScreenshotItem) -> Result<(), PluginError> {
+    if is_video_item(item) {
+        return Err(PluginError::new(
+            -32000,
+            "Video recordings cannot be copied to the clipboard",
+        ));
+    }
     let rel = item
         .media_file
         .as_ref()

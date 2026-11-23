@@ -10,7 +10,12 @@
   import SettingsDrawer from "./components/SettingsDrawer.svelte";
   import Toast from "./components/Toast.svelte";
   import WindowPicker from "./components/WindowPicker.svelte";
-  import { friendlyError, itemMatches } from "./lib/format.js";
+  import {
+    formatDuration,
+    friendlyError,
+    isVideoItem,
+    itemMatches,
+  } from "./lib/format.js";
   import { resolveMessages } from "./lib/i18n.js";
 
   const DEFAULT_PREFS = {
@@ -23,6 +28,8 @@
     thumbSize: "medium",
     historyCount: 0,
     historyMax: 200,
+    recordFps: 8,
+    recordMaxEdge: 1280,
   };
 
   let text = $state(resolveMessages("en"));
@@ -41,6 +48,10 @@
   let bootError = $state("");
   let capturing = $state(false);
   let captureMode = $state("");
+  let recording = $state(false);
+  let recordingBusy = $state(false);
+  let recordingElapsedMs = $state(0);
+  let recordingTimer = 0;
   let refreshing = $state(false);
   let clearOpen = $state(false);
   let clearing = $state(false);
@@ -52,7 +63,10 @@
   let toastVisible = $state(false);
   /** @type {"" | "loading" | "success"} */
   let toastIcon = $state("");
-  /** @type {null | { src: string, loading?: boolean }} */
+  /** Blob-assemble fallback for hosts without mediaUrl; larger videos skip in-plugin playback. */
+  const VIDEO_BLOB_MAX_BYTES = 12 * 1024 * 1024;
+
+  /** @type {null | { src: string, poster?: string, loading?: boolean, kind?: "image" | "video", note?: string, revealId?: string }} */
   let preview = $state(null);
   /** @type {null | Record<string, any>} */
   let annotateItem = $state(null);
@@ -73,6 +87,8 @@
   const mediaCache = new Map();
   /** @type {string | null} */
   let mediaToken = null;
+  /** @type {string | null} */
+  let previewBlobUrl = null;
   /** @type {null | (() => void)} */
   let unsubscribeEvents = null;
 
@@ -130,6 +146,10 @@
     next.historyMax = [50, 100, 200, 500].includes(Number(next.historyMax))
       ? Number(next.historyMax)
       : 200;
+    next.recordFps = [5, 8, 10].includes(Number(next.recordFps)) ? Number(next.recordFps) : 8;
+    next.recordMaxEdge = [720, 1080, 1280].includes(Number(next.recordMaxEdge))
+      ? Number(next.recordMaxEdge)
+      : 1280;
     return next;
   }
 
@@ -224,9 +244,20 @@
     showToast(msg === text.mediaMissing ? msg : `${text.error}: ${msg}`);
   }
 
+  function revokePreviewBlob() {
+    if (!previewBlobUrl) return;
+    try {
+      URL.revokeObjectURL(previewBlobUrl);
+    } catch {
+      // Ignore revoke races.
+    }
+    previewBlobUrl = null;
+  }
+
   async function releaseMediaToken() {
     const token = mediaToken;
     mediaToken = null;
+    revokePreviewBlob();
     if (!token || typeof window.dbxPlugin?.media?.close !== "function") return;
     try {
       await window.dbxPlugin.media.close(token);
@@ -238,6 +269,49 @@
   function closePreview() {
     preview = null;
     void releaseMediaToken();
+  }
+
+  function base64ToUint8(dataBase64) {
+    const raw = atob(String(dataBase64 || ""));
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  /** Fallback when host mediaUrl is unavailable: assemble blob via ranged filesystem/media/read. */
+  async function loadMediaBlobUrl(itemId) {
+    const head = await window.dbxPlugin.invoke("filesystem/media/read", {
+      id: itemId,
+      head: true,
+    });
+    const size = Number(head?.size) || 0;
+    const contentType = head?.contentType || "application/octet-stream";
+    if (size <= 0) {
+      throw new Error(text.mediaMissing);
+    }
+    // Keep each JSON payload under the Host API bridge limit (~2 MiB).
+    const chunkSize = 512 * 1024;
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
+      const end = Math.min(offset + chunkSize - 1, size - 1);
+      const part = await window.dbxPlugin.invoke("filesystem/media/read", {
+        id: itemId,
+        range: `bytes=${offset}-${end}`,
+      });
+      if (part?.rangeNotSatisfiable) {
+        throw new Error(text.mediaMissing);
+      }
+      const chunk = base64ToUint8(part?.dataBase64);
+      if (!chunk.length) {
+        throw new Error(text.mediaMissing);
+      }
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    revokePreviewBlob();
+    previewBlobUrl = URL.createObjectURL(new Blob([bytes], { type: contentType }));
+    return previewBlobUrl;
   }
 
   async function loadList() {
@@ -425,7 +499,220 @@
     permissionConfirmKind = null;
   }
 
+  function clearRecordingTimer() {
+    if (recordingTimer) {
+      clearInterval(recordingTimer);
+      recordingTimer = 0;
+    }
+    clearRecordingStatusPoll();
+  }
+
+  /** Keep in sync with backend MAX_DURATION (10 minutes). */
+  const RECORD_MAX_MS = 10 * 60 * 1000;
+  let recordingStatusPoll = 0;
+  let recordingStatusChecking = false;
+
+  function clearRecordingStatusPoll() {
+    if (recordingStatusPoll) {
+      clearInterval(recordingStatusPoll);
+      recordingStatusPoll = 0;
+    }
+    recordingStatusChecking = false;
+  }
+
+  function startRecordingTimer(startedAt, elapsedHintMs) {
+    clearRecordingTimer();
+    clearRecordingStatusPoll();
+    // Drive the UI from the local clock. Optionally seed from backend elapsed on reconnect.
+    const hint = Number(elapsedHintMs);
+    const remote = Number(startedAt);
+    let base = Date.now();
+    if (Number.isFinite(hint) && hint >= 0) {
+      base = Date.now() - hint;
+    } else if (Number.isFinite(remote) && remote > 1e12 && remote <= Date.now() + 2000) {
+      base = remote;
+    }
+    const tick = () => {
+      recordingElapsedMs = Math.max(0, Date.now() - base);
+      // Backend stops capturing at 10 min; auto-stop so the clip is imported into history.
+      if (recordingElapsedMs >= RECORD_MAX_MS && recording && !recordingBusy) {
+        clearRecordingTimer();
+        clearRecordingStatusPoll();
+        void stopRecording();
+      }
+    };
+    tick();
+    recordingTimer = setInterval(tick, 250);
+    // Detect capture ending early (disk / max duration) via backend promote → finalizing.
+    recordingStatusPoll = setInterval(() => {
+      if (!recording || recordingBusy || recordingStatusChecking) return;
+      recordingStatusChecking = true;
+      void (async () => {
+        try {
+          const status = await window.dbxPlugin.invoke("screenshot/record/status", {});
+          if (status?.item || status?.error) {
+            clearRecordingTimer();
+            recording = false;
+            recordingBusy = true;
+            showToast(text.recordSaving, { durationMs: 0, icon: "loading" });
+            try {
+              await finishRecordingFromResult(status);
+            } catch (error) {
+              const message = friendlyError(error, text);
+              bootError = message;
+              showToast(`${text.error}: ${message}`);
+            } finally {
+              recordingBusy = false;
+            }
+            return;
+          }
+          if (status?.finalizing) {
+            clearRecordingTimer();
+            recording = false;
+            recordingBusy = true;
+            showToast(text.recordSaving, { durationMs: 0, icon: "loading" });
+            try {
+              await waitForRecordingFinalize();
+            } catch (error) {
+              const message = friendlyError(error, text);
+              bootError = message;
+              showToast(`${text.error}: ${message}`);
+            } finally {
+              recordingBusy = false;
+            }
+          }
+        } catch {
+          // ignore transient status errors while recording
+        } finally {
+          recordingStatusChecking = false;
+        }
+      })();
+    }, 1000);
+  }
+
+  async function toggleRecording() {
+    if (recordingBusy || capturing || delayCountdownOpen) return;
+    if (recording) {
+      await stopRecording();
+      return;
+    }
+    await startRecording();
+  }
+
+  async function startRecording() {
+    if (!(await ensurePermissionForCapture())) return;
+    recordingBusy = true;
+    bootError = "";
+    try {
+      const selectedDisplay =
+        displayIndex === null || displayIndex === "" || displayIndex === undefined
+          ? undefined
+          : Number(displayIndex);
+      const status = await window.dbxPlugin.invoke("screenshot/record/start", {
+        displayIndex: Number.isFinite(selectedDisplay) ? selectedDisplay : undefined,
+      });
+      recording = true;
+      toastVisible = false;
+      toastIcon = "";
+      startRecordingTimer(Date.now(), 0);
+    } catch (error) {
+      recording = false;
+      clearRecordingTimer();
+      const message = friendlyError(error, text);
+      bootError = message;
+      showToast(`${text.error}: ${message}`);
+    } finally {
+      recordingBusy = false;
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function finishRecordingFromResult(result) {
+    if (result?.item) {
+      showToast(text.recorded, { icon: "success" });
+      await loadList();
+      prefs = { ...prefs, historyCount: items.length };
+      return;
+    }
+    if (result?.error) {
+      throw result.error;
+    }
+    await loadList();
+    prefs = { ...prefs, historyCount: items.length };
+    showToast(text.recorded, { icon: "success" });
+  }
+
+  /** Poll until background mux finishes (or times out). */
+  async function waitForRecordingFinalize() {
+    const deadline = Date.now() + 10 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await sleep(400);
+      const status = await window.dbxPlugin.invoke("screenshot/record/status", {});
+      if (status?.item || status?.error) {
+        await finishRecordingFromResult(status);
+        return;
+      }
+      // Idle without item/error usually means another poll already consumed the result.
+      if (!status?.finalizing && !status?.recording) {
+        await loadList();
+        prefs = { ...prefs, historyCount: items.length };
+        const latest = items[0];
+        if (latest && isVideoItem(latest)) {
+          showToast(text.recorded, { icon: "success" });
+          return;
+        }
+        throw new Error(text.recordSaveTimeout || "Timed out saving recording");
+      }
+    }
+    throw new Error(text.recordSaveTimeout || "Timed out saving recording");
+  }
+
+  async function stopRecording() {
+    recordingBusy = true;
+    showToast(text.recordSaving, { durationMs: 0, icon: "loading" });
+    try {
+      recording = false;
+      clearRecordingTimer();
+      recordingElapsedMs = 0;
+      const result = await window.dbxPlugin.invoke("screenshot/record/stop", {});
+      if (result?.item || result?.error) {
+        await finishRecordingFromResult(result);
+        return;
+      }
+      if (result?.finalizing) {
+        await waitForRecordingFinalize();
+        return;
+      }
+      await loadList();
+      prefs = { ...prefs, historyCount: items.length };
+    } catch (error) {
+      const message = friendlyError(error, text);
+      bootError = message;
+      showToast(`${text.error}: ${message}`);
+      try {
+        const status = await window.dbxPlugin.invoke("screenshot/record/status", {});
+        recording = Boolean(status?.recording);
+        if (recording) {
+          startRecordingTimer(status?.startedAt, status?.elapsedMs);
+        } else {
+          clearRecordingTimer();
+          recordingElapsedMs = 0;
+        }
+      } catch {
+        recording = false;
+        clearRecordingTimer();
+        recordingElapsedMs = 0;
+      }
+    } finally {
+      recordingBusy = false;
+    }
+  }
+
   async function runCapture(mode, options = {}) {
+    if (recording || recordingBusy) return;
     if (!(await ensurePermissionForCapture())) return;
 
     capturing = true;
@@ -490,6 +777,10 @@
 
   async function openAnnotator(item, options = {}) {
     if (!item?.id) return;
+    if (isVideoItem(item)) {
+      showToast(text.videoAnnotateUnsupported);
+      return;
+    }
     // Fresh captures just wrote the file — skip probe.
     if (!options.discardOnCancel) {
       try {
@@ -642,6 +933,10 @@
   }
 
   async function copyItem(item) {
+    if (isVideoItem(item)) {
+      showToast(text.videoCopyUnsupported);
+      return;
+    }
     try {
       await window.dbxPlugin.invoke("screenshot/copy", { id: item.id });
       showToast(text.copied);
@@ -692,10 +987,11 @@
   }
 
   async function previewImage(item) {
-    const cached = mediaCache.get(item.id);
+    const video = isVideoItem(item);
+    const cached = !video ? mediaCache.get(item.id) : null;
     if (cached) {
       await releaseMediaToken();
-      preview = { src: cached, loading: false };
+      preview = { src: cached, loading: false, kind: "image" };
       return;
     }
     try {
@@ -705,13 +1001,16 @@
       return;
     }
     // Show the list thumbnail immediately, then open the stored file.
+    // Never put a JPEG data-URL into <video src> — browsers stick at 0:00.
     await releaseMediaToken();
     preview = {
-      src: item.previewDataUrl || "",
+      src: video ? "" : item.previewDataUrl || "",
+      poster: video ? item.previewDataUrl || "" : "",
       loading: true,
+      kind: video ? "video" : "image",
     };
     try {
-      // Prefer host media URL: browser loads the stored JPEG directly (no UI-bridge base64).
+      // Prefer host media URL: browser loads the stored file directly (no UI-bridge base64).
       if (
         window.dbxPlugin.capabilities?.mediaUrl &&
         typeof window.dbxPlugin.media?.open === "function"
@@ -721,15 +1020,49 @@
         });
         if (opened?.url) {
           mediaToken = opened.token ?? null;
-          preview = { src: opened.url, loading: false };
+          preview = {
+            src: opened.url,
+            poster: video ? item.previewDataUrl || "" : "",
+            loading: false,
+            kind: video ? "video" : "image",
+          };
           return;
         }
+      }
+
+      if (video) {
+        // Dev / older hosts lack mediaUrl — small files can still blob-assemble;
+        // large ones stay as poster + reveal (bridge cannot stream Range into <video>).
+        const head = await window.dbxPlugin.invoke("filesystem/media/read", {
+          id: item.id,
+          head: true,
+        });
+        const size = Number(head?.size) || 0;
+        if (size > VIDEO_BLOB_MAX_BYTES) {
+          preview = {
+            src: "",
+            poster: item.previewDataUrl || "",
+            loading: false,
+            kind: "video",
+            note: text.videoPreviewTooLarge,
+            revealId: item.id,
+          };
+          return;
+        }
+        const blobUrl = await loadMediaBlobUrl(item.id);
+        preview = {
+          src: blobUrl,
+          poster: item.previewDataUrl || "",
+          loading: false,
+          kind: "video",
+        };
+        return;
       }
 
       const result = await window.dbxPlugin.invoke("screenshot/media", { id: item.id });
       if (result?.dataUrl) {
         mediaCache.set(item.id, result.dataUrl);
-        preview = { src: result.dataUrl, loading: false };
+        preview = { src: result.dataUrl, loading: false, kind: "image" };
       } else {
         preview = preview ? { ...preview, loading: false } : null;
       }
@@ -797,6 +1130,35 @@
       await loadPrefs();
       await Promise.all([loadTargets(), loadList()]);
       prefs = { ...prefs, historyCount: items.length };
+      try {
+        const status = await window.dbxPlugin.invoke("screenshot/record/status", {});
+        if (status?.item || status?.error) {
+          recordingBusy = true;
+          showToast(text.recordSaving, { durationMs: 0, icon: "loading" });
+          try {
+            await finishRecordingFromResult(status);
+          } finally {
+            recordingBusy = false;
+          }
+        } else if (status?.finalizing) {
+          recordingBusy = true;
+          showToast(text.recordSaving, { durationMs: 0, icon: "loading" });
+          try {
+            await waitForRecordingFinalize();
+          } catch (error) {
+            const message = friendlyError(error, text);
+            bootError = message;
+            showToast(`${text.error}: ${message}`);
+          } finally {
+            recordingBusy = false;
+          }
+        } else {
+          recording = Boolean(status?.recording);
+          if (recording) startRecordingTimer(status?.startedAt, status?.elapsedMs);
+        }
+      } catch {
+        recording = false;
+      }
     } catch (error) {
       bootError = error?.message || String(error);
     }
@@ -805,6 +1167,7 @@
   onDestroy(() => {
     clearTimeout(toastTimer);
     clearDelayCountdownTimer();
+    clearRecordingTimer();
     void releaseMediaToken();
     unsubscribeEvents?.();
     unsubscribeEvents = null;
@@ -823,7 +1186,7 @@
         <button
           class="btn"
           type="button"
-          disabled={capturing || delayCountdownOpen}
+          disabled={capturing || recording || recordingBusy || delayCountdownOpen}
           onclick={openDisplayPicker}
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
@@ -841,7 +1204,7 @@
         <button
           class="btn"
           type="button"
-          disabled={capturing || delayCountdownOpen}
+          disabled={capturing || recording || recordingBusy || delayCountdownOpen}
           onclick={openWindowPicker}
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
@@ -859,7 +1222,7 @@
         <button
           class="btn"
           type="button"
-          disabled={capturing || delayCountdownOpen}
+          disabled={capturing || recording || recordingBusy || delayCountdownOpen}
           onclick={() => runCapture("region")}
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
@@ -877,7 +1240,7 @@
         <button
           class="btn"
           type="button"
-          disabled={capturing || delayCountdownOpen}
+          disabled={capturing || recording || recordingBusy || delayCountdownOpen}
           onclick={startDelayedCapture}
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
@@ -891,6 +1254,24 @@
             />
           </svg>
           {text.captureDelay}
+        </button>
+        <button
+          class="btn"
+          class:recording
+          type="button"
+          disabled={capturing || recordingBusy || delayCountdownOpen}
+          onclick={toggleRecording}
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            {#if recording}
+              <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" />
+            {:else}
+              <circle cx="12" cy="12" r="5.5" fill="currentColor" />
+            {/if}
+          </svg>
+          {recording
+            ? `${text.recordStop} ${formatDuration(recordingElapsedMs)}`
+            : text.recordStart}
         </button>
       </div>
 
@@ -1096,10 +1477,21 @@
 <ImageLightbox
   open={!!preview && !annotateItem}
   src={preview?.src || ""}
+  poster={preview?.poster || ""}
   loading={Boolean(preview?.loading)}
+  kind={preview?.kind === "video" ? "video" : "image"}
+  note={preview?.note || ""}
+  revealLabel={preview?.revealId ? text.videoPreviewOpenFolder : ""}
   alt={text.title}
   closeLabel={text.close}
   onclose={closePreview}
+  onreveal={
+    preview?.revealId
+      ? () => {
+          void revealItem({ id: preview.revealId });
+        }
+      : undefined
+  }
 />
 
 <Annotator
@@ -1209,6 +1601,12 @@
 
   .btn svg {
     flex-shrink: 0;
+  }
+
+  .btn.recording {
+    color: #fff;
+    border-color: color-mix(in srgb, var(--danger) 70%, transparent);
+    background: color-mix(in srgb, var(--danger) 88%, #7f1d1d);
   }
 
   .btn:disabled {

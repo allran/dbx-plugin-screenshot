@@ -37,6 +37,9 @@ dbx-plugin package .
 | `screenshot/windows` | 列出可截取窗口（过滤控制中心等系统 UI，不含预览） |
 | `screenshot/window/preview` | `{ id }` 异步生成单个窗口缩略图 |
 | `screenshot/capture` | `{ mode: "display"\|"window"\|"region", displayIndex?, windowId?, delaySecs? }` |
+| `screenshot/record/start` | `{ displayIndex? }` 开始无声屏幕录制（MP4） |
+| `screenshot/record/stop` | 停止录制并写入历史 |
+| `screenshot/record/status` | `{ recording, finalizing, startedAt?, elapsedMs, … }`；合成完成后可能带 `item` / `error` |
 | `screenshot/list` | 历史列表 |
 | `screenshot/copy` | 复制到系统剪贴板 |
 | `screenshot/media` | lightbox data URL |
@@ -44,3 +47,5 @@ dbx-plugin package .
 | `screenshot/favorite` / `delete` / `clear` | 收藏 / 删除 / 清空 |
 
 区域截图（macOS）走系统 `screencapture -i` 框选；Esc 取消。
+
+屏幕录制：录制中按设置的 FPS 落 JPEG（最长边可配），停止后后台用 ffmpeg 合成 MP4（无音频，时长对齐墙钟）；无 ffmpeg 时回退 OpenH264。启动前做磁盘预检，录制中空间过低会提前停采。最长约 10 分钟；Wayland 可能不稳定。

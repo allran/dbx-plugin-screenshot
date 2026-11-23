@@ -6,6 +6,7 @@ mod model;
 mod permission;
 mod plugin;
 mod prefs;
+mod record;
 mod reveal;
 mod store;
 mod util;

@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from "svelte";
-  import { formatItemLabel, formatTime } from "../lib/format.js";
+  import { formatDuration, formatItemLabel, formatTime, isVideoItem } from "../lib/format.js";
 
   let {
     item,
@@ -17,6 +17,7 @@
   let copied = $state(false);
   let viewTimer = 0;
   let copyTimer = 0;
+  const video = $derived(isVideoItem(item));
 
   function scheduleView(action) {
     return (event) => {
@@ -42,7 +43,13 @@
   });
 </script>
 
-<div class="row" class:copied role="listitem" title={text.hint} ondblclick={handleCopy}>
+<div
+  class="row"
+  class:copied
+  role="listitem"
+  title={video ? text.hintVideo : text.hint}
+  ondblclick={video ? undefined : handleCopy}
+>
   <button
     class="thumb-btn"
     type="button"
@@ -54,6 +61,9 @@
     {:else}
       <div class="thumb placeholder"></div>
     {/if}
+    {#if video}
+      <span class="badge" aria-hidden="true">▶</span>
+    {/if}
   </button>
 
   <div class="meta">
@@ -63,27 +73,32 @@
       {#if item.width && item.height}
         · {text.size(item.width, item.height)}
       {/if}
+      {#if video && item.durationMs}
+        · {formatDuration(item.durationMs)}
+      {/if}
     </div>
   </div>
 
   <div class="actions">
-    <button
-      class="icon"
-      type="button"
-      title={text.annotate}
-      aria-label={text.annotate}
-      onclick={(e) => {
-        e.stopPropagation();
-        onannotate?.(item);
-      }}
-    >
-      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-        <path
-          fill="currentColor"
-          d="M3 17.3V21h3.8l10.9-11-3.8-3.7L3 17.3Zm17.7-10.9a1 1 0 0 0 0-1.4l-2.6-2.6a1 1 0 0 0-1.4 0l-1.8 1.8 3.8 3.7 2-1.5Z"
-        />
-      </svg>
-    </button>
+    {#if !video}
+      <button
+        class="icon"
+        type="button"
+        title={text.annotate}
+        aria-label={text.annotate}
+        onclick={(e) => {
+          e.stopPropagation();
+          onannotate?.(item);
+        }}
+      >
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M3 17.3V21h3.8l10.9-11-3.8-3.7L3 17.3Zm17.7-10.9a1 1 0 0 0 0-1.4l-2.6-2.6a1 1 0 0 0-1.4 0l-1.8 1.8 3.8 3.7 2-1.5Z"
+          />
+        </svg>
+      </button>
+    {/if}
     <button
       class="icon"
       class:active={item.favorite}
@@ -158,6 +173,7 @@
   }
 
   .thumb-btn {
+    position: relative;
     flex-shrink: 0;
     width: 88px;
     height: 56px;
@@ -167,6 +183,21 @@
     overflow: hidden;
     background: color-mix(in srgb, var(--fg) 4%, transparent);
     cursor: pointer;
+  }
+
+  .badge {
+    position: absolute;
+    right: 6px;
+    bottom: 5px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-size: 9px;
+    line-height: 1;
+    color: #fff;
+    background: color-mix(in srgb, #000 55%, transparent);
   }
 
   .thumb {
